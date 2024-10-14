@@ -92,42 +92,6 @@ contract NFTStaking is ERC20, Ownable {
         emit NFTStaked(msg.sender, _tokenId, block.timestamp);
     }
 
-    /*
-    function calculateRewards(uint256 _tokenId) public view returns (uint256) {
-        Stake memory staked = vault[_tokenId];
-        if (staked.owner == address(0)) return 0;
-
-        uint256 startDay = (staked.lastClaimTimestamp - staked.timestamp) / SECONDS_PER_DAY;
-        uint256 endDay = (block.timestamp - staked.timestamp) / SECONDS_PER_DAY;
-        uint256 totalReward = 0;
-
-        for (uint256 i = 0; i < rewardIntervals.length; i++) {
-            PiecewiseInterval memory interval = rewardIntervals[i];
-
-            if (startDay >= interval.end) continue;
-            if (endDay <= interval.start) break;
-
-            uint256 intervalStartDay = Math.max(startDay, interval.start);
-            uint256 intervalEndDay = Math.min(endDay, interval.end);
-            uint256 daysInInterval = intervalEndDay - intervalStartDay;
-
-            if (interval.isVariable) {
-                int256 startValue = int256(intervalStartDay) * interval.variableBase + interval.fixedValue;
-                int256 endValue = int256(intervalEndDay) * interval.variableBase + interval.fixedValue;
-                int256 reward = (startValue + endValue) * int256(daysInInterval) / 2;
-                
-                if (reward > 0) {
-                    totalReward += uint256(reward);
-                }
-            } else {
-                totalReward += daysInInterval * uint256(interval.fixedValue);
-            }
-        }
-
-        return totalReward;
-    }
-    */
-
     function unstake(uint256 _tokenId) external {
         Stake memory staked = vault[_tokenId];
         require(staked.owner == msg.sender, "Not the owner");
@@ -145,53 +109,93 @@ contract NFTStaking is ERC20, Ownable {
         emit RewardsClaimed(msg.sender, reward);
     }
 
+    // function calculateRewards(uint256 _tokenId) public view returns (uint256) {
+    //     Stake memory staked = vault[_tokenId];
+    //     if (staked.owner == address(0)) return 0;
+
+    //     uint256 stakingDays = (block.timestamp - staked.timestamp) /
+    //         SECONDS_PER_DAY;
+    //     uint256 totalReward = 0;
+
+    //     for (uint256 i = 0; i < rewardIntervals.length; i++) {
+    //         PiecewiseInterval memory interval = rewardIntervals[i];
+
+    //         // If staking period hasn't reached the interval start
+    //         // Helpful for those cases where start != 0...
+    //         if (stakingDays <= interval.start) {
+    //             break;
+    //         }
+
+    //         // Days to be considered in interval.
+    //         uint256 daysInInterval = stakingDays > interval.end
+    //             ? interval.end - interval.start
+    //             : stakingDays - interval.start;
+
+    //         if (interval.isVariable) {
+    //             int256 sl = int256(interval.start) *
+    //                 interval.variableBase +
+    //                 interval.fixedValue;
+
+    //             int256 bl = int256(interval.start + daysInInterval) *
+    //                 interval.variableBase +
+    //                 interval.fixedValue;
+
+    //             int256 r = bl + sl;
+
+    //             if (r < 0) {
+    //                 totalReward -= (daysInInterval * uint256(-(r))) / 2;
+    //             } else {
+    //                 totalReward = (daysInInterval * uint256(r)) / 2;
+    //             }
+    //         } else {
+    //             // Fixed reward/day
+    //             totalReward += daysInInterval * uint256(interval.fixedValue);
+    //         }
+
+    //         stakingDays -= daysInInterval;
+
+    //         if (stakingDays <= 0) {
+    //             break;
+    //         }
+    //     }
+
+    //     return totalReward;
+    // }
+
     function calculateRewards(uint256 _tokenId) public view returns (uint256) {
         Stake memory staked = vault[_tokenId];
         if (staked.owner == address(0)) return 0;
 
-        uint256 stakingDays = (block.timestamp - staked.timestamp) /
+        uint256 startDay = (staked.lastClaimTimestamp - staked.timestamp) /
             SECONDS_PER_DAY;
+        uint256 endDay = (block.timestamp - staked.timestamp) / SECONDS_PER_DAY;
         uint256 totalReward = 0;
 
         for (uint256 i = 0; i < rewardIntervals.length; i++) {
             PiecewiseInterval memory interval = rewardIntervals[i];
 
-            // If staking period hasn't reached the interval start
-            // Helpful for those cases where start != 0...
-            if (stakingDays <= interval.start) {
-                break;
-            }
+            if (startDay >= interval.end) continue;
+            if (endDay <= interval.start) break;
 
-            // Days to be considered in interval.
-            uint256 daysInInterval = stakingDays > interval.end
-                ? interval.end - interval.start
-                : stakingDays - interval.start;
+            uint256 intervalStartDay = Math.max(startDay, interval.start);
+            uint256 intervalEndDay = Math.min(endDay, interval.end);
+            uint256 daysInInterval = intervalEndDay - intervalStartDay;
 
             if (interval.isVariable) {
-                int256 sl = int256(interval.start) *
+                int256 startValue = int256(intervalStartDay) *
                     interval.variableBase +
                     interval.fixedValue;
-
-                int256 bl = int256(interval.start + daysInInterval) *
+                int256 endValue = int256(intervalEndDay) *
                     interval.variableBase +
                     interval.fixedValue;
+                int256 reward = ((startValue + endValue) *
+                    int256(daysInInterval)) / 2;
 
-                int256 r = bl + sl;
-
-                if (r < 0) {
-                    totalReward -= (daysInInterval * uint256(-(r))) / 2;
-                } else {
-                    totalReward = (daysInInterval * uint256(r)) / 2;
+                if (reward > 0) {
+                    totalReward += uint256(reward);
                 }
             } else {
-                // Fixed reward/day
                 totalReward += daysInInterval * uint256(interval.fixedValue);
-            }
-
-            stakingDays -= daysInInterval;
-
-            if (stakingDays <= 0) {
-                break;
             }
         }
 
@@ -199,13 +203,13 @@ contract NFTStaking is ERC20, Ownable {
     }
 
     function claimRewards(uint256 _tokenId) external {
-        Stake memory staked = vault[_tokenId];
+        Stake storage staked = vault[_tokenId];
         require(staked.owner == msg.sender, "Not the owner");
 
         uint256 reward = calculateRewards(_tokenId);
         require(reward > 0, "No rewards to claim");
 
-        vault[_tokenId].timestamp = block.timestamp; // Update stake timestamp after claim
+        staked.lastClaimTimestamp = block.timestamp;
         _mint(msg.sender, reward);
 
         emit RewardsClaimed(msg.sender, reward);
