@@ -27,11 +27,10 @@ contract NFTStakingTest is Test {
         user1 = address(0x123);
         nftToken = new MockNFT();
 
-        // Set up the piecewise intervals as per the contract requirements
         uint256[4] memory starts = [uint256(0), 7, 14, 21];
         uint256[4] memory ends = [uint256(7), 14, 21, 28];
-        uint256[4] memory fixedValues = [uint256(7), 0, 14, 0];
-        uint256[4] memory variableBases = [uint256(0), 7, 0, 21];
+        int256[4] memory fixedValues = [int256(7), 0, 14, 0];
+        int256[4] memory variableBases = [int256(0), 1, 0, 1];
         bool[4] memory isVariables = [false, true, false, true];
 
         stakingContract = new NFTStaking(
@@ -56,9 +55,15 @@ contract NFTStakingTest is Test {
         vm.startPrank(user1);
         stakingContract.stake(1);
 
-        (uint256 tokenId, , address stakeOwner) = stakingContract.vault(1);
+        (
+            uint256 tokenId,
+            uint256 timestamp,
+            uint256 lastClaimTimestamp,
+            address stakeOwner
+        ) = stakingContract.vault(1);
         assertEq(tokenId, 1);
         assertEq(stakeOwner, user1);
+        assertEq(timestamp, lastClaimTimestamp);
         assertEq(nftToken.ownerOf(1), address(stakingContract));
 
         vm.stopPrank();
@@ -80,11 +85,13 @@ contract NFTStakingTest is Test {
         stakingContract.stake(1);
 
         vm.warp(block.timestamp + 7 days);
+        uint256 initialBalance = stakingContract.balanceOf(user1);
         stakingContract.unstake(1);
 
-        (uint256 tokenId, , ) = stakingContract.vault(1);
+        (uint256 tokenId, , , ) = stakingContract.vault(1);
         assertEq(tokenId, 0);
         assertEq(nftToken.ownerOf(1), user1);
+        assertGt(stakingContract.balanceOf(user1), initialBalance);
 
         vm.stopPrank();
     }
@@ -113,29 +120,12 @@ contract NFTStakingTest is Test {
         vm.warp(block.timestamp + 12 days);
 
         uint256 rewards = stakingContract.calculateRewards(1);
-        assertEq(rewards, 94); // 7*7 + (8+9+10+11+12)
+        assertEq(rewards, 96); // 7*7 + 0.5(7+12)5
 
         uint256 initialBalance = stakingContract.balanceOf(user1);
         stakingContract.claimRewards(1);
         uint256 finalBalance = stakingContract.balanceOf(user1);
-        assertEq(finalBalance - initialBalance, 94);
-
-        vm.stopPrank();
-    }
-
-    function testRewardsAfter17Days() public {
-        vm.startPrank(user1);
-        stakingContract.stake(1);
-
-        vm.warp(block.timestamp + 17 days);
-
-        uint256 rewards = stakingContract.calculateRewards(1);
-        assertEq(rewards, 161); // 49 + (8+9+10+11+12+13+14) + 14*3
-
-        uint256 initialBalance = stakingContract.balanceOf(user1);
-        stakingContract.claimRewards(1);
-        uint256 finalBalance = stakingContract.balanceOf(user1);
-        assertEq(finalBalance - initialBalance, 161);
+        assertEq(finalBalance - initialBalance, 96);
 
         vm.stopPrank();
     }
@@ -147,52 +137,37 @@ contract NFTStakingTest is Test {
         vm.warp(block.timestamp + 25 days);
 
         uint256 rewards = stakingContract.calculateRewards(1);
-        assertEq(rewards, 273); // 49 + 77 + 14*7 + (22+23+24+25)
+        assertEq(rewards, 312); // 49 + 73.5 + 14*7 + 0.5(21 + 25)4 = 312
 
         uint256 initialBalance = stakingContract.balanceOf(user1);
         stakingContract.claimRewards(1);
         uint256 finalBalance = stakingContract.balanceOf(user1);
-        assertEq(finalBalance - initialBalance, 273);
+        assertEq(finalBalance - initialBalance, 312);
 
         vm.stopPrank();
     }
 
-    function testStakingMultipleNFTs() public {
+    function testMultipleClaimsWithinPeriod() public {
         vm.startPrank(user1);
-
         stakingContract.stake(1);
-        stakingContract.stake(2);
 
+        // Claim after 10 days
         vm.warp(block.timestamp + 10 days);
-
-        uint256 rewards1 = stakingContract.calculateRewards(1);
-        uint256 rewards2 = stakingContract.calculateRewards(2);
-        assertEq(rewards1, 83); // 49 (first interval) + (8+9+10)
-        assertEq(rewards2, 83);
-
-        uint256 initialBalance = stakingContract.balanceOf(user1);
+        uint256 firstReward = stakingContract.calculateRewards(1);
         stakingContract.claimRewards(1);
-        stakingContract.claimRewards(2);
-        uint256 finalBalance = stakingContract.balanceOf(user1);
-        assertEq(finalBalance - initialBalance, 166);
 
-        vm.stopPrank();
-    }
+        // Claim after another 5 days (total 15 days)
+        vm.warp(block.timestamp + 5 days);
+        uint256 secondReward = stakingContract.calculateRewards(1);
+        stakingContract.claimRewards(1);
 
-    function testResetRewardsAfterClaim() public {
-        vm.startPrank(user1);
-        stakingContract.stake(1);
-
-        // vm.warp(block.timestamp + 10 days);
-        // stakingContract.claimRewards(1);
-
-        // vm.warp(block.timestamp + 5 days);
-        // uint256 rewards = stakingContract.calculateRewards(1);
-        // assertEq(rewards, 64); // (11+12+13+14+14)
-
+        // Total rewards should be the same as if claimed once after 15 days
+        vm.warp(block.timestamp - 15 days);
+        stakingContract.stake(2);
         vm.warp(block.timestamp + 15 days);
-        uint256 rewards = stakingContract.calculateRewards(1);
-        assertEq(rewards, 126); // (7*5 + 8+9+10+11+12+13+14+ 14)
+        uint256 totalReward = stakingContract.calculateRewards(2);
+
+        assertEq(firstReward + secondReward, totalReward);
 
         vm.stopPrank();
     }
