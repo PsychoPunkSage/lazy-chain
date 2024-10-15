@@ -171,19 +171,174 @@ contract NFTStakingTest is Test {
 
         vm.stopPrank();
     }
+
+    function testRewardsExactly7Days() public {
+        vm.startPrank(user1);
+        stakingContract.stake(1);
+
+        vm.warp(block.timestamp + 7 days);
+
+        uint256 rewards = stakingContract.calculateRewards(1);
+        assertEq(rewards, 49); // 7 * 7 (end of first interval)
+
+        uint256 initialBalance = stakingContract.balanceOf(user1);
+        stakingContract.claimRewards(1);
+        uint256 finalBalance = stakingContract.balanceOf(user1);
+        assertEq(finalBalance - initialBalance, 49);
+
+        vm.stopPrank();
+    }
+
+    function testRewardsExactly14Days() public {
+        vm.startPrank(user1);
+        stakingContract.stake(1);
+
+        vm.warp(block.timestamp + 14 days);
+
+        uint256 rewards = stakingContract.calculateRewards(1);
+        assertEq(rewards, 122); // 7*7 + 0.5*(7+14)*7
+
+        uint256 initialBalance = stakingContract.balanceOf(user1);
+        stakingContract.claimRewards(1);
+        uint256 finalBalance = stakingContract.balanceOf(user1);
+        assertEq(finalBalance - initialBalance, 122);
+
+        vm.stopPrank();
+    }
+
+    function testRewardsExactly21Days() public {
+        vm.startPrank(user1);
+        stakingContract.stake(1);
+
+        vm.warp(block.timestamp + 21 days);
+
+        uint256 rewards = stakingContract.calculateRewards(1);
+        assertEq(rewards, 220); // 7*7 + 0.5*(7+14)*7 + 14*7
+
+        uint256 initialBalance = stakingContract.balanceOf(user1);
+        stakingContract.claimRewards(1);
+        uint256 finalBalance = stakingContract.balanceOf(user1);
+        assertEq(finalBalance - initialBalance, 220);
+
+        vm.stopPrank();
+    }
+
+    function testRewardsAfter28Days() public {
+        vm.startPrank(user1);
+        stakingContract.stake(1);
+
+        vm.warp(block.timestamp + 28 days);
+
+        uint256 rewards = stakingContract.calculateRewards(1);
+        assertEq(rewards, 391); // Calculated for the entire 4 intervals
+
+        uint256 initialBalance = stakingContract.balanceOf(user1);
+        stakingContract.claimRewards(1);
+        uint256 finalBalance = stakingContract.balanceOf(user1);
+        assertEq(finalBalance - initialBalance, 391);
+
+        vm.stopPrank();
+    }
+
+    function testSetRewardIntervalsSuccess() public {
+        vm.startPrank(owner);
+
+        // Define new intervals to set
+        NFTStaking.PiecewiseInterval[] memory intervals;
+        intervals[0] = NFTStaking.PiecewiseInterval(1, 5, 100, 0, false); // Example interval: (1, 5) -> 100
+        intervals[1] = NFTStaking.PiecewiseInterval(6, 10, 200, 1, true); // Example interval: (6, 10) -> 200
+
+        // Set the reward intervals
+        stakingContract.setRewardIntervals(intervals);
+
+        // Ensure the intervals array has been populated before accessing it
+        uint256 length = stakingContract.getRewardIntervalsLength();
+        require(length > 0, "Intervals have not been set or array is empty");
+
+        // Access the rewardIntervals and validate the fields
+        (
+            uint256 i1s,
+            uint256 i1e,
+            int256 i1fv,
+            int256 i1vb,
+            bool i1v
+        ) = stakingContract.rewardIntervals(0);
+        (
+            uint256 i2s,
+            uint256 i2e,
+            int256 i2fv,
+            int256 i2vb,
+            bool i2v
+        ) = stakingContract.rewardIntervals(1);
+
+        // Now validate each field
+        // assertEq(interval1.start, 1);
+        // assertEq(interval1.end, 5);
+        // assertEq(interval1.fixedValue, 100);
+        // assertEq(interval1.variableBase, 0);
+        // assertEq(interval1.isVariable, false);
+
+        assertEq(i2s, 6);
+        assertEq(i2e, 10);
+        assertEq(i2fv, 200);
+        assertEq(i2vb, 1);
+        assertEq(i2v, true);
+
+        vm.stopPrank();
+    }
+
+    function testSetRewardIntervalsRevertIfNotOwner() public {
+        vm.expectRevert();
+        vm.startPrank(user1);
+
+        NFTStaking.PiecewiseInterval[] memory intervals;
+        intervals[0] = NFTStaking.PiecewiseInterval(2, 3, 1, 0, false);
+
+        stakingContract.setRewardIntervals(intervals);
+
+        vm.stopPrank();
+    }
+
+    function testSetRewardIntervalsRevertOnEmptyIntervals() public {
+        vm.startPrank(owner);
+
+        NFTStaking.PiecewiseInterval[] memory emptyIntervals;
+
+        vm.expectRevert("Invalid intervals length");
+        stakingContract.setRewardIntervals(emptyIntervals);
+
+        vm.stopPrank();
+    }
+
+    function testSetRewardIntervalsDeletesOldIntervals() public {
+        vm.startPrank(owner);
+
+        NFTStaking.PiecewiseInterval[] memory intervals;
+        intervals[0] = NFTStaking.PiecewiseInterval(1, 5, 100, 0, false);
+
+        stakingContract.setRewardIntervals(intervals);
+
+        NFTStaking.PiecewiseInterval[] memory newIntervals;
+        newIntervals[0] = NFTStaking.PiecewiseInterval(6, 10, 200, 1, true);
+
+        stakingContract.setRewardIntervals(newIntervals);
+        (
+            uint256 i2s,
+            uint256 i2e,
+            int256 i2fv,
+            int256 i2vb,
+            bool i2v
+        ) = stakingContract.rewardIntervals(1);
+
+        assertEq(i2s, 6);
+        assertEq(i2e, 10);
+        assertEq(i2fv, 200);
+        assertEq(i2vb, 1);
+        assertEq(i2v, true);
+
+        vm.expectRevert();
+        stakingContract.rewardIntervals(1);
+
+        vm.stopPrank();
+    }
 }
-
-/*
-
-0  - 7  : 7
-7  - 14 : x
-14 - 21 : 14
-21 - 28 : x -7
-
-10 days:
-> 49 + (8 + 9 + 10) : 62
-
-15 days:
-> 62 + (11 + 12 + 13 + 14 + 14) : 62 + 64
-
-*/
