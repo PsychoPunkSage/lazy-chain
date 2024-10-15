@@ -7,6 +7,10 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
+/**
+ * @title NFT Staking Contract
+ * @dev This contract allows users to stake their NFTs and earn rewards over time based on defined piecewise reward intervals.
+ */
 contract NFTStaking is ERC20, Ownable {
     using Math for uint256;
 
@@ -14,6 +18,9 @@ contract NFTStaking is ERC20, Ownable {
     uint256 public constant LOCK_PERIOD = 7 days;
     uint256 public constant SECONDS_PER_DAY = 86400;
 
+    ////////////
+    // STRUCT //
+    ////////////
     struct Stake {
         uint256 tokenId;
         uint256 timestamp;
@@ -32,6 +39,9 @@ contract NFTStaking is ERC20, Ownable {
     mapping(uint256 => Stake) public vault;
     PiecewiseInterval[] public rewardIntervals;
 
+    ////////////
+    // EVENTS //
+    ////////////
     event NFTStaked(
         address indexed owner,
         uint256 indexed tokenId,
@@ -44,6 +54,18 @@ contract NFTStaking is ERC20, Ownable {
     );
     event RewardsClaimed(address indexed owner, uint256 reward);
 
+    /////////////////
+    // CONSTRUCTOR //
+    /////////////////
+    /**
+     * @notice Constructor to initialize the NFT staking contract
+     * @param _nftToken Address of the NFT contract
+     * @param _starts Array of starting days for reward intervals
+     * @param _ends Array of ending days for reward intervals
+     * @param _fixedValues Array of fixed reward values for intervals
+     * @param _variableBases Array of variable base values for intervals
+     * @param _isVariables Array indicating if intervals are variable or fixed
+     */
     constructor(
         address _nftToken,
         uint256[4] memory _starts,
@@ -66,6 +88,13 @@ contract NFTStaking is ERC20, Ownable {
         }
     }
 
+    ///////////////////////
+    // FUNCTIONS: setter //
+    ///////////////////////
+    /**
+     * @notice Set reward intervals (only owner can call this)
+     * @param _intervals Array of PiecewiseInterval structs to set new reward intervals
+     */
     function setRewardIntervals(
         PiecewiseInterval[] memory _intervals
     ) public onlyOwner {
@@ -77,6 +106,10 @@ contract NFTStaking is ERC20, Ownable {
         }
     }
 
+    /**
+     * @notice Stake an NFT to start earning rewards
+     * @param _tokenId The ID of the NFT to stake
+     */
     function stake(uint256 _tokenId) external {
         require(nftToken.ownerOf(_tokenId) == msg.sender, "Not the owner");
         require(vault[_tokenId].tokenId == 0, "Already staked");
@@ -92,6 +125,10 @@ contract NFTStaking is ERC20, Ownable {
         emit NFTStaked(msg.sender, _tokenId, block.timestamp);
     }
 
+    /**
+     * @notice Unstake an NFT after the lock period has passed
+     * @param _tokenId The ID of the NFT to unstake
+     */
     function unstake(uint256 _tokenId) external {
         Stake memory staked = vault[_tokenId];
         require(staked.owner == msg.sender, "Not the owner");
@@ -109,59 +146,11 @@ contract NFTStaking is ERC20, Ownable {
         emit RewardsClaimed(msg.sender, reward);
     }
 
-    // function calculateRewards(uint256 _tokenId) public view returns (uint256) {
-    //     Stake memory staked = vault[_tokenId];
-    //     if (staked.owner == address(0)) return 0;
-
-    //     uint256 stakingDays = (block.timestamp - staked.timestamp) /
-    //         SECONDS_PER_DAY;
-    //     uint256 totalReward = 0;
-
-    //     for (uint256 i = 0; i < rewardIntervals.length; i++) {
-    //         PiecewiseInterval memory interval = rewardIntervals[i];
-
-    //         // If staking period hasn't reached the interval start
-    //         // Helpful for those cases where start != 0...
-    //         if (stakingDays <= interval.start) {
-    //             break;
-    //         }
-
-    //         // Days to be considered in interval.
-    //         uint256 daysInInterval = stakingDays > interval.end
-    //             ? interval.end - interval.start
-    //             : stakingDays - interval.start;
-
-    //         if (interval.isVariable) {
-    //             int256 sl = int256(interval.start) *
-    //                 interval.variableBase +
-    //                 interval.fixedValue;
-
-    //             int256 bl = int256(interval.start + daysInInterval) *
-    //                 interval.variableBase +
-    //                 interval.fixedValue;
-
-    //             int256 r = bl + sl;
-
-    //             if (r < 0) {
-    //                 totalReward -= (daysInInterval * uint256(-(r))) / 2;
-    //             } else {
-    //                 totalReward = (daysInInterval * uint256(r)) / 2;
-    //             }
-    //         } else {
-    //             // Fixed reward/day
-    //             totalReward += daysInInterval * uint256(interval.fixedValue);
-    //         }
-
-    //         stakingDays -= daysInInterval;
-
-    //         if (stakingDays <= 0) {
-    //             break;
-    //         }
-    //     }
-
-    //     return totalReward;
-    // }
-
+    /**
+     * @notice Calculate the total rewards for a staked NFT based on the staking duration and reward intervals
+     * @param _tokenId The ID of the staked NFT
+     * @return totalReward The total reward the user is entitled to
+     */
     function calculateRewards(uint256 _tokenId) public view returns (uint256) {
         Stake memory staked = vault[_tokenId];
         if (staked.owner == address(0)) return 0;
@@ -202,6 +191,10 @@ contract NFTStaking is ERC20, Ownable {
         return totalReward;
     }
 
+    /**
+     * @notice Claim rewards for a staked NFT
+     * @param _tokenId The ID of the staked NFT
+     */
     function claimRewards(uint256 _tokenId) external {
         Stake storage staked = vault[_tokenId];
         require(staked.owner == msg.sender, "Not the owner");
@@ -213,5 +206,9 @@ contract NFTStaking is ERC20, Ownable {
         _mint(msg.sender, reward);
 
         emit RewardsClaimed(msg.sender, reward);
+    }
+
+    function getRewardIntervalsLength() public view returns (uint256) {
+        return rewardIntervals.length;
     }
 }
